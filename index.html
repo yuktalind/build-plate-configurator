@@ -178,6 +178,11 @@
         <input id="thread-grid" type="number" value="25" min="10" max="50" step="5">
       </div>
 
+      <div class="control-group">
+        <label>Edge Margin (mm)</label>
+        <input id="edge-margin" type="number" value="10" min="0" max="50" step="5">
+      </div>
+
       <div class="divider"></div>
 
       <div id="info">
@@ -298,6 +303,7 @@
       plateBrush.updateMatrixWorld();
 
       const threadGrid = parseFloat(document.getElementById('thread-grid').value);
+      const edgeMargin = parseFloat(document.getElementById('edge-margin').value);
       const threadType = document.getElementById('thread-type').value;
       const threadDia = threadType === 'M5' ? 4.2 : threadType === 'M6' ? 5.0 : 6.8;
       const isThrough = thickness <= 9.8;
@@ -313,6 +319,14 @@
         for (let j = 0; j <= zHoles; j++) {
           const x = (i - xHoles / 2) * threadGrid;
           const z = (j - zHoles / 2) * threadGrid;
+
+          // Skip holes that would extend beyond plate boundaries with margin
+          const halfWidth = width / 2;
+          const halfDepth = depth / 2;
+          const holeRadius = threadDia / 2;
+
+          if (Math.abs(x) + holeRadius + edgeMargin > halfWidth) continue;
+          if (Math.abs(z) + holeRadius + edgeMargin > halfDepth) continue;
 
           const threadHole = createThreadedHole(threadDia, threadDepth + 0.5, isThrough);
           const yOffset = isThrough ? 0 : (thickness - threadDepth) / 2;
@@ -402,6 +416,7 @@
     document.getElementById('plate-thickness').addEventListener('change', updatePlate);
     document.getElementById('thread-type').addEventListener('change', updatePlate);
     document.getElementById('thread-grid').addEventListener('input', updatePlate);
+    document.getElementById('edge-margin').addEventListener('input', updatePlate);
     
     function onPointerDown(e) {
       isDragging = true;
