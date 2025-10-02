@@ -12,10 +12,15 @@ All changes to the application should follow this issue-based workflow:
 
 ### Creating Issues
 
+**Via Chat** (Preferred):
+- User describes issue to Claude in conversation
+- Claude creates issue using `gh issue create -t "title" -b "description"`
+- Claude implements immediately after creating issue
+
 **Via GitHub Web UI**:
 1. Navigate to repository Issues tab
 2. Click "New Issue"
-3. Provide title and description of requested change
+3. Provide title and description
 
 **Via Command Line**:
 ```bash
