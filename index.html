@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CNC Build Plate Configurator</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #000;
+      color: #fff;
+      overflow: hidden;
+    }
+    
+    #container {
+      display: flex;
+      width: 100vw;
+      height: 100vh;
+    }
+    
+    #controls {
+      width: 280px;
+      background: #000;
+      padding: 24px;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+    
+    #controls h1 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #999;
+      margin-bottom: 24px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .control-group {
+      margin-bottom: 20px;
+    }
+    
+    .control-group label {
+      display: block;
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    
+    .control-group select,
+    .control-group input {
+      width: 100%;
+      padding: 10px 12px;
+      background: #333;
+      border: 1px solid #555;
+      color: #ccc;
+      font-size: 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .control-group select:hover,
+    .control-group input:hover {
+      border-color: #777;
+    }
+    
+    .control-group select:focus,
+    .control-group input:focus {
+      outline: none;
+      border-color: #999;
+      background: #3a3a3a;
+    }
+    
+    .divider {
+      height: 1px;
+      background: #333;
+      margin: 24px 0;
+    }
+    
+    #info {
+      font-size: 12px;
+      color: #666;
+      line-height: 1.8;
+    }
+    
+    #info div {
+      margin-bottom: 8px;
+    }
+    
+    #info span {
+      color: #999;
+      font-weight: 500;
+    }
+    
+    #canvas-container {
+      flex: 1;
+      position: relative;
+      background: #000;
+    }
+    
+    #plate-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: grab;
+    }
+    
+    #plate-canvas:active {
+      cursor: grabbing;
+    }
+    
+    @media (max-width: 768px) {
+      #container {
+        flex-direction: column;
+      }
+      
+      #controls {
+        width: 100%;
+        height: auto;
+        max-height: 40vh;
+      }
+      
+      #canvas-container {
+        height: 60vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="controls">
+      <h1>Configuration</h1>
+      
+      <div class="control-group">
+        <label>Plate Size</label>
+        <select id="plate-size">
+          <option value="100x200">100 × 200 mm</option>
+          <option value="200x200" selected>200 × 200 mm</option>
+          <option value="200x300">200 × 300 mm</option>
+          <option value="250x250">250 × 250 mm</option>
+          <option value="300x300">300 × 300 mm</option>
+          <option value="300x400">300 × 400 mm</option>
+          <option value="400x400">400 × 400 mm</option>
+          <option value="300x500">300 × 500 mm</option>
+          <option value="400x500">400 × 500 mm</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label>Thickness (mm)</label>
+        <select id="plate-thickness">
+          <option value="9.8" selected>9.8 mm</option>
+          <option value="10">10 mm</option>
+          <option value="12.7">12.7 mm</option>
+          <option value="15">15 mm</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label>Thread Type</label>
+        <select id="thread-type">
+          <option value="M6" selected>M6</option>
+          <option value="M5">M5</option>
+          <option value="M8">M8</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label>Thread Grid (mm)</label>
+        <input id="thread-grid" type="number" value="25" min="10" max="50" step="5">
+      </div>
+
+      <div class="divider"></div>
+
+      <div id="info">
+        <div>Thread depth: <span id="info-thread-depth">9.8mm</span></div>
+        <div>Through-holes: <span id="info-through">Yes</span></div>
+        <div>Mounting holes: <span id="info-mounting">4</span></div>
+        <div>Mounting Ø: <span id="info-mounting-dia">6.2mm</span></div>
+      </div>
+    </div>
+
+    <div id="canvas-container">
+      <canvas id="plate-canvas"></canvas>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    const canvas = document.getElementById('plate-canvas');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
+    
+    const camera = new THREE.PerspectiveCamera(
+      45,
+      canvas.clientWidth / canvas.clientHeight,
+      0.1,
+      2000
+    );
+    camera.position.set(0, 300, 400);
+    camera.lookAt(0, 0, 0);
+    
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.shadowMap.enabled = true;
+    
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+    scene.add(ambientLight);
+    
+    const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.6);
+    directionalLight1.position.set(200, 300, 200);
+    scene.add(directionalLight1);
+    
+    const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.3);
+    directionalLight2.position.set(-200, 200, -100);
+    scene.add(directionalLight2);
+    
+    const aluminumMaterial = new THREE.MeshStandardMaterial({
+      color: 0xc0c0c0,
+      metalness: 0.8,
+      roughness: 0.2,
+      envMapIntensity: 1.0
+    });
+    
+    let plateMesh, threadGroup;
+    let autoRotate = true;
+    let rotationY = 0;
+    let rotationZ = -20 * Math.PI / 180;
+    let isDragging = false;
+    let previousMousePosition = { x: 0, y: 0 };
+    let velocity = { x: 0, y: 0 };
+    
+    function createPlate(width, depth, thickness) {
+      if (plateMesh) scene.remove(plateMesh);
+      if (threadGroup) scene.remove(threadGroup);
+      
+      const geometry = new THREE.BoxGeometry(width, thickness, depth);
+      plateMesh = new THREE.Mesh(geometry, aluminumMaterial);
+      plateMesh.castShadow = true;
+      scene.add(plateMesh);
+      
+      threadGroup = new THREE.Group();
+      scene.add(threadGroup);
+      
+      const threadGrid = parseFloat(document.getElementById('thread-grid').value);
+      const threadType = document.getElementById('thread-type').value;
+      const threadDia = threadType === 'M5' ? 4.2 : threadType === 'M6' ? 5.0 : 6.8;
+      const isThrough = thickness <= 9.8;
+      
+      const xHoles = Math.floor(width / threadGrid);
+      const zHoles = Math.floor(depth / threadGrid);
+      
+      for (let i = 0; i <= xHoles; i++) {
+        for (let j = 0; j <= zHoles; j++) {
+          const x = (i - xHoles / 2) * threadGrid;
+          const z = (j - zHoles / 2) * threadGrid;
+          
+          const holeGeometry = new THREE.CylinderGeometry(
+            threadDia / 2,
+            threadDia / 2,
+            isThrough ? thickness + 0.5 : thickness * 0.8,
+            16
+          );
+          const holeMaterial = new THREE.MeshStandardMaterial({
+            color: 0x1a1a1a,
+            metalness: 0.9,
+            roughness: 0.4
+          });
+          const hole = new THREE.Mesh(holeGeometry, holeMaterial);
+          hole.position.set(x, isThrough ? 0 : thickness * 0.1, z);
+          hole.rotation.x = Math.PI / 2;
+          threadGroup.add(hole);
+        }
+      }
+      
+      const mountingDia = 6.2;
+      const mountingCount = getMountingHoleCount(width, depth);
+      const mountingGeometry = new THREE.CylinderGeometry(
+        mountingDia / 2,
+        mountingDia / 2,
+        thickness + 0.5,
+        16
+      );
+      const mountingMaterial = new THREE.MeshStandardMaterial({
+        color: 0x0a0a0a,
+        metalness: 0.95,
+        roughness: 0.3
+      });
+      
+      if (mountingCount === 2) {
+        [-50, 50].forEach(x => {
+          const hole = new THREE.Mesh(mountingGeometry, mountingMaterial);
+          hole.position.set(x, 0, 0);
+          hole.rotation.x = Math.PI / 2;
+          threadGroup.add(hole);
+        });
+      } else if (mountingCount === 4) {
+        [-50, 50].forEach(x => {
+          [-50, 50].forEach(z => {
+            const hole = new THREE.Mesh(mountingGeometry, mountingMaterial);
+            hole.position.set(x, 0, z);
+            hole.rotation.x = Math.PI / 2;
+            threadGroup.add(hole);
+          });
+        });
+      } else if (mountingCount === 6) {
+        const positions = [[-50, -100], [-50, 0], [-50, 100], [50, -100], [50, 0], [50, 100]];
+        positions.forEach(([x, z]) => {
+          const hole = new THREE.Mesh(mountingGeometry, mountingMaterial);
+          hole.position.set(x, 0, z);
+          hole.rotation.x = Math.PI / 2;
+          threadGroup.add(hole);
+        });
+      } else if (mountingCount === 12) {
+        const positions = [
+          [-100, -150], [-100, -50], [-100, 50], [-100, 150],
+          [0, -150], [0, 150],
+          [100, -150], [100, -50], [100, 50], [100, 150]
+        ];
+        positions.slice(0, mountingCount).forEach(([x, z]) => {
+          const hole = new THREE.Mesh(mountingGeometry, mountingMaterial);
+          hole.position.set(x, 0, z);
+          hole.rotation.x = Math.PI / 2;
+          threadGroup.add(hole);
+        });
+      }
+      
+      updateInfo(width, depth, thickness);
+    }
+    
+    function getMountingHoleCount(width, depth) {
+      if (width === 100 && depth === 200) return 2;
+      if (width === 200 && depth === 200) return 4;
+      if (width === 200 && depth === 300) return 6;
+      if (width === 300 && depth === 400) return 12;
+      return 4;
+    }
+    
+    function updateInfo(width, depth, thickness) {
+      const threadType = document.getElementById('thread-type').value;
+      const isThrough = thickness <= 9.8;
+      const mountingCount = getMountingHoleCount(width, depth);
+      const mountingDia = threadType === 'M5' ? 5.2 : threadType === 'M6' ? 6.2 : 8.2;
+      
+      document.getElementById('info-thread-depth').textContent = 
+        isThrough ? `${thickness}mm (through)` : `${(thickness * 0.8).toFixed(1)}mm`;
+      document.getElementById('info-through').textContent = isThrough ? 'Yes' : 'No';
+      document.getElementById('info-mounting').textContent = mountingCount;
+      document.getElementById('info-mounting-dia').textContent = `${mountingDia}mm`;
+    }
+    
+    function updatePlate() {
+      const size = document.getElementById('plate-size').value.split('x');
+      const width = parseFloat(size[0]);
+      const depth = parseFloat(size[1]);
+      const thickness = parseFloat(document.getElementById('plate-thickness').value);
+      createPlate(width, depth, thickness);
+    }
+    
+    document.getElementById('plate-size').addEventListener('change', updatePlate);
+    document.getElementById('plate-thickness').addEventListener('change', updatePlate);
+    document.getElementById('thread-type').addEventListener('change', updatePlate);
+    document.getElementById('thread-grid').addEventListener('input', updatePlate);
+    
+    function onPointerDown(e) {
+      isDragging = true;
+      autoRotate = false;
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      previousMousePosition = { x: clientX, y: clientY };
+      velocity = { x: 0, y: 0 };
+    }
+    
+    function onPointerMove(e) {
+      if (isDragging) {
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const deltaX = clientX - previousMousePosition.x;
+        const deltaY = clientY - previousMousePosition.y;
+        
+        velocity.x = deltaX * 0.01;
+        velocity.y = deltaY * 0.01;
+        
+        rotationY += velocity.x;
+        rotationZ += velocity.y;
+        rotationZ = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotationZ));
+        
+        previousMousePosition = { x: clientX, y: clientY };
+      }
+    }
+    
+    function onPointerUp() {
+      isDragging = false;
+    }
+    
+    canvas.addEventListener('mousedown', onPointerDown);
+    canvas.addEventListener('mousemove', onPointerMove);
+    canvas.addEventListener('mouseup', onPointerUp);
+    canvas.addEventListener('touchstart', onPointerDown);
+    canvas.addEventListener('touchmove', onPointerMove);
+    canvas.addEventListener('touchend', onPointerUp);
+    
+    function animate() {
+      requestAnimationFrame(animate);
+      
+      if (!isDragging) {
+        velocity.x *= 0.95;
+        velocity.y *= 0.95;
+        
+        if (Math.abs(velocity.x) > 0.001 || Math.abs(velocity.y) > 0.001) {
+          rotationY += velocity.x;
+          rotationZ += velocity.y;
+          rotationZ = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotationZ));
+        } else if (autoRotate) {
+          rotationY += 0.005;
+        }
+      }
+      
+      if (plateMesh) {
+        plateMesh.rotation.y = rotationY;
+        plateMesh.rotation.z = rotationZ;
+      }
+      if (threadGroup) {
+        threadGroup.rotation.y = rotationY;
+        threadGroup.rotation.z = rotationZ;
+      }
+      
+      renderer.render(scene, camera);
+    }
+    
+    window.addEventListener('resize', () => {
+      camera.aspect = canvas.clientWidth / canvas.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+    });
+    
+    createPlate(200, 200, 9.8);
+    animate();
+  </script>
+</body>
+</html>
