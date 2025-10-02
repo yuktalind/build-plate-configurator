@@ -14,6 +14,7 @@ All changes to the application should follow this issue-based workflow:
 
 **Via Chat** (Preferred):
 - User describes issue to Claude in conversation
+- Claude translates vague descriptions into concise, professionally-worded issue descriptions
 - Claude creates issue using `gh issue create -t "title" -b "description"`
 - Claude implements immediately after creating issue
 
@@ -59,27 +60,54 @@ GitHub Pages deployment is the intended hosting method:
 3. Enable GitHub Pages in repository settings
 4. Access via `https://[username].github.io/build-plate-configurator/`
 
+## German CNC Terminology
+
+**UI Language**: All user-facing text must be in German. Code remains in English.
+
+**Key Terms**:
+- **Gewinde** = thread/threading
+- **Sackloch** = blind hole (doesn't go through)
+- **Durchgangsloch** = through-hole (goes all the way through)
+- **Gewindebohrung** = threaded hole
+- **Senkung** = counterbore (flat-bottomed recess)
+- **Rastergewinde** = grid thread holes
+- **Befestigungslöcher** = mounting holes
+- **Gewindetiefe** = thread depth
+- **Plattengröße** = plate size
+- **Dicke** = thickness
+- **Gewindeart** = thread type
+- **Gewinderaster** = thread grid
+- **Randabstand** = edge margin
+
 ## Architecture
 
 ### Single-File Structure
 Everything is contained in `index.html`:
 - HTML structure with left sidebar controls and right 3D canvas
 - Embedded CSS with responsive layout (desktop-first, mobile breakpoint at 768px)
-- Embedded JavaScript using Three.js r128 from CDN
+- Embedded JavaScript using Three.js r128 and three-bvh-csg from CDN
 
 ### Key Components
 
-**3D Scene Setup** (lines 198-225):
-- Black background, perspective camera at (0, 300, 400)
-- Ambient light (0.3 intensity) + 2 directional lights (0.6, 0.3)
+**3D Scene Setup**:
+- Adjustable background (grayscale slider)
+- Perspective camera at (0, 300, 400)
+- Adjustable ambient light (slider 0-1, default 0.3) + 2 directional lights
 - WebGL renderer with shadow mapping and high DPI support
 
-**Plate Generation** (`createPlate` function, lines 242-338):
+**Plate Generation** (`createPlate` function):
+- Uses CSG boolean subtraction (three-bvh-csg library)
 - Main plate: BoxGeometry with aluminum material (0.8 metalness, 0.2 roughness)
-- Thread holes: CylinderGeometry array based on grid spacing and thread type
-- Mounting holes: Fixed positions determined by plate dimensions
+- Thread holes: Actual geometry subtraction with simplified thread ridges (torus rings)
+- Mounting holes: Counterbore (Senkung) with through-threaded holes for thick plates
+- Edge margin detection prevents holes too close to boundaries
 
-**Interaction Model** (lines 374-426):
+**Hole Types**:
+- **Rastergewinde**: Grid pattern, thickness ≤9.8mm = Durchgangsgewinde, >9.8mm = Sacklochgewinde at 9.8mm depth
+- **Befestigungslöcher**: Fixed positions, always Senkung mit Durchgangsgewinde (counterbore with through-thread)
+- Senkung depth = thickness - 9.8mm (for plates >9.8mm thick)
+
+**Interaction Model**:
 - Mouse/touch drag for manual rotation with momentum physics
 - Auto-rotate when idle (0.005 rad/frame on Y-axis)
 - Velocity damping factor: 0.95
@@ -97,27 +125,26 @@ Everything is contained in `index.html`:
 - M8: 6.8mm thread hole, 8.2mm mounting hole
 
 **Thread Depth Logic**:
-- Thickness ≤9.8mm: Full through-holes
-- Thickness >9.8mm: 80% depth threaded holes
+- Rastergewinde: ≤9.8mm = Durchgangsgewinde (through), >9.8mm = Sacklochgewinde at 9.8mm depth
+- Befestigungslöcher: Always through-threaded with Senkung for plates >9.8mm
 
-**Mounting Hole Patterns** (`getMountingHoleCount`, lines 340-346):
+**Mounting Hole Patterns** (`getMountingHoleCount`):
 - 100x200: 2 holes at ±50mm on X-axis
 - 200x200: 4 holes in ±50mm grid
 - 200x300: 6 holes at ±50mm X, ±100mm Z
 - 300x400: 12 holes in distributed pattern
 - Other sizes: Default to 4 holes
 
+**Edge Margin**:
+- Configurable distance from plate edge (default 10mm)
+- Rastergewinde skipped if hole radius + margin exceeds plate boundary
+- Does not apply to fixed Befestigungslöcher
+
 ### Material Properties
 
-**Aluminum 5083** (`aluminumMaterial`, lines 227-232):
+**Aluminum 5083** (`aluminumMaterial`):
 - Color: 0xc0c0c0 (silver-gray)
 - Metalness: 0.8, Roughness: 0.2
-
-**Thread Holes** (lines 273-277):
-- Color: 0x1a1a1a (dark), Metalness: 0.9, Roughness: 0.4
-
-**Mounting Holes** (lines 293-297):
-- Color: 0x0a0a0a (darker), Metalness: 0.95, Roughness: 0.3
 
 ## Development Rules
 
