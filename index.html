@@ -185,6 +185,18 @@
 
       <div class="divider"></div>
 
+      <div class="control-group">
+        <label>Background Brightness</label>
+        <input id="bg-brightness" type="range" value="0" min="0" max="255" step="1">
+      </div>
+
+      <div class="control-group">
+        <label>Ambient Light</label>
+        <input id="ambient-light" type="range" value="0.3" min="0" max="1" step="0.05">
+      </div>
+
+      <div class="divider"></div>
+
       <div id="info">
         <div>Thread depth: <span id="info-thread-depth">9.8mm</span></div>
         <div>Through-holes: <span id="info-through">Yes</span></div>
@@ -380,6 +392,15 @@
     document.getElementById('thread-type').addEventListener('change', updatePlate);
     document.getElementById('thread-grid').addEventListener('input', updatePlate);
     document.getElementById('edge-margin').addEventListener('input', updatePlate);
+
+    document.getElementById('bg-brightness').addEventListener('input', (e) => {
+      const brightness = parseInt(e.target.value);
+      scene.background = new THREE.Color(brightness << 16 | brightness << 8 | brightness);
+    });
+
+    document.getElementById('ambient-light').addEventListener('input', (e) => {
+      ambientLight.intensity = parseFloat(e.target.value);
+    });
     
     function onPointerDown(e) {
       isDragging = true;
