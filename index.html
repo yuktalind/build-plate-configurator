@@ -194,7 +194,9 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three-bvh-csg@0.0.16/build/bundle.umd.cjs"></script>
   <script>
+    const { Brush, Evaluator, SUBTRACTION } = window.ThreeBVHCSG;
     const canvas = document.getElementById('plate-canvas');
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
@@ -231,7 +233,7 @@
       envMapIntensity: 1.0
     });
     
-    let plateMesh, threadGroup;
+    let plateMesh;
     let autoRotate = true;
     let rotationY = 0;
     let rotationZ = -20 * Math.PI / 180;
@@ -239,97 +241,132 @@
     let previousMousePosition = { x: 0, y: 0 };
     let velocity = { x: 0, y: 0 };
     
+    function createThreadedHole(diameter, depth, isThrough) {
+      const group = new THREE.Group();
+      const threadPitch = diameter * 0.15;
+      const threadHeight = diameter * 0.08;
+      const ridges = Math.floor(depth / threadPitch);
+
+      // Main hole cylinder
+      const holeGeo = new THREE.CylinderGeometry(diameter / 2, diameter / 2, depth, 32);
+      const holeMesh = new THREE.Mesh(holeGeo);
+      holeMesh.updateMatrix();
+      group.add(holeMesh);
+
+      // Thread ridges (simplified as rings)
+      for (let i = 0; i < ridges; i++) {
+        const yPos = (i - ridges / 2) * threadPitch;
+        const ringGeo = new THREE.TorusGeometry(
+          diameter / 2 - threadHeight / 2,
+          threadHeight,
+          8,
+          16
+        );
+        const ringMesh = new THREE.Mesh(ringGeo);
+        ringMesh.rotation.x = Math.PI / 2;
+        ringMesh.position.y = yPos;
+        ringMesh.updateMatrix();
+        group.add(ringMesh);
+      }
+
+      return group;
+    }
+
+    function createCounterbore(threadDia, boreDia, boreDepth, totalDepth) {
+      const group = new THREE.Group();
+
+      // Counterbore (Senkung)
+      const boreGeo = new THREE.CylinderGeometry(boreDia / 2, boreDia / 2, boreDepth, 32);
+      const boreMesh = new THREE.Mesh(boreGeo);
+      boreMesh.position.y = (totalDepth - boreDepth) / 2;
+      boreMesh.updateMatrix();
+      group.add(boreMesh);
+
+      // Through hole with threads
+      const threadedHole = createThreadedHole(threadDia, totalDepth, true);
+      group.add(threadedHole);
+
+      return group;
+    }
+
     function createPlate(width, depth, thickness) {
       if (plateMesh) scene.remove(plateMesh);
-      if (threadGroup) scene.remove(threadGroup);
-      
-      const geometry = new THREE.BoxGeometry(width, thickness, depth);
-      plateMesh = new THREE.Mesh(geometry, aluminumMaterial);
-      plateMesh.castShadow = true;
-      scene.add(plateMesh);
-      
-      threadGroup = new THREE.Group();
-      scene.add(threadGroup);
-      
+
+      // Start with solid plate
+      const plateGeo = new THREE.BoxGeometry(width, thickness, depth);
+      let plateBrush = new Brush(plateGeo);
+      plateBrush.updateMatrixWorld();
+
       const threadGrid = parseFloat(document.getElementById('thread-grid').value);
       const threadType = document.getElementById('thread-type').value;
       const threadDia = threadType === 'M5' ? 4.2 : threadType === 'M6' ? 5.0 : 6.8;
       const isThrough = thickness <= 9.8;
-      
+      const threadDepth = isThrough ? thickness : 9.8;
+
       const xHoles = Math.floor(width / threadGrid);
       const zHoles = Math.floor(depth / threadGrid);
-      
+
+      const evaluator = new Evaluator();
+
+      // Subtract thread holes
       for (let i = 0; i <= xHoles; i++) {
         for (let j = 0; j <= zHoles; j++) {
           const x = (i - xHoles / 2) * threadGrid;
           const z = (j - zHoles / 2) * threadGrid;
-          
-          const holeGeometry = new THREE.CylinderGeometry(
-            threadDia / 2,
-            threadDia / 2,
-            isThrough ? thickness + 0.5 : thickness * 0.8,
-            16
-          );
-          const holeMaterial = new THREE.MeshStandardMaterial({
-            color: 0x1a1a1a,
-            metalness: 0.9,
-            roughness: 0.4
-          });
-          const hole = new THREE.Mesh(holeGeometry, holeMaterial);
-          hole.position.set(x, isThrough ? 0 : thickness * 0.1, z);
-          threadGroup.add(hole);
+
+          const threadHole = createThreadedHole(threadDia, threadDepth + 0.5, isThrough);
+          const yOffset = isThrough ? 0 : (thickness - threadDepth) / 2;
+          threadHole.position.set(x, yOffset, z);
+          threadHole.updateMatrixWorld(true);
+
+          const holeBrush = new Brush(threadHole);
+          holeBrush.updateMatrixWorld();
+
+          plateBrush = evaluator.evaluate(plateBrush, holeBrush, SUBTRACTION);
         }
       }
-      
-      const mountingDia = 6.2;
+
+      // Subtract mounting holes with counterbore
+      const mountingThreadDia = threadType === 'M5' ? 5.2 : threadType === 'M6' ? 6.2 : 8.2;
+      const mountingBoreDia = mountingThreadDia * 2;
+      const mountingBoreDepth = thickness > 9.8 ? thickness - 9.8 : 0;
       const mountingCount = getMountingHoleCount(width, depth);
-      const mountingGeometry = new THREE.CylinderGeometry(
-        mountingDia / 2,
-        mountingDia / 2,
-        thickness + 0.5,
-        16
-      );
-      const mountingMaterial = new THREE.MeshStandardMaterial({
-        color: 0x0a0a0a,
-        metalness: 0.95,
-        roughness: 0.3
+
+      const mountingPositions = getMountingPositions(width, depth, mountingCount);
+
+      mountingPositions.forEach(([x, z]) => {
+        let mountingHole;
+        if (mountingBoreDepth > 0) {
+          mountingHole = createCounterbore(mountingThreadDia, mountingBoreDia, mountingBoreDepth, thickness + 0.5);
+        } else {
+          mountingHole = createThreadedHole(mountingThreadDia, thickness + 0.5, true);
+        }
+        mountingHole.position.set(x, 0, z);
+        mountingHole.updateMatrixWorld(true);
+
+        const holeBrush = new Brush(mountingHole);
+        holeBrush.updateMatrixWorld();
+
+        plateBrush = evaluator.evaluate(plateBrush, holeBrush, SUBTRACTION);
       });
-      
-      if (mountingCount === 2) {
-        [-50, 50].forEach(x => {
-          const hole = new THREE.Mesh(mountingGeometry, mountingMaterial);
-          hole.position.set(x, 0, 0);
-          threadGroup.add(hole);
-        });
-      } else if (mountingCount === 4) {
-        [-50, 50].forEach(x => {
-          [-50, 50].forEach(z => {
-            const hole = new THREE.Mesh(mountingGeometry, mountingMaterial);
-            hole.position.set(x, 0, z);
-            threadGroup.add(hole);
-          });
-        });
-      } else if (mountingCount === 6) {
-        const positions = [[-50, -100], [-50, 0], [-50, 100], [50, -100], [50, 0], [50, 100]];
-        positions.forEach(([x, z]) => {
-          const hole = new THREE.Mesh(mountingGeometry, mountingMaterial);
-          hole.position.set(x, 0, z);
-          threadGroup.add(hole);
-        });
-      } else if (mountingCount === 12) {
-        const positions = [
-          [-100, -150], [-100, -50], [-100, 50], [-100, 150],
-          [0, -150], [0, 150],
-          [100, -150], [100, -50], [100, 50], [100, 150]
-        ];
-        positions.slice(0, mountingCount).forEach(([x, z]) => {
-          const hole = new THREE.Mesh(mountingGeometry, mountingMaterial);
-          hole.position.set(x, 0, z);
-          threadGroup.add(hole);
-        });
-      }
-      
+
+      plateMesh = new THREE.Mesh(plateBrush.geometry, aluminumMaterial);
+      plateMesh.castShadow = true;
+      scene.add(plateMesh);
+
       updateInfo(width, depth, thickness);
+    }
+
+    function getMountingPositions(width, depth, count) {
+      if (count === 2) return [[-50, 0], [50, 0]];
+      if (count === 4) return [[-50, -50], [-50, 50], [50, -50], [50, 50]];
+      if (count === 6) return [[-50, -100], [-50, 0], [-50, 100], [50, -100], [50, 0], [50, 100]];
+      if (count === 12) return [
+        [-100, -150], [-100, -50], [-100, 50], [-100, 150],
+        [0, -150], [0, 150],
+        [100, -150], [100, -50], [100, 50], [100, 150]
+      ];
+      return [[-50, -50], [-50, 50], [50, -50], [50, 50]];
     }
     
     function getMountingHoleCount(width, depth) {
@@ -423,10 +460,6 @@
       if (plateMesh) {
         plateMesh.rotation.y = rotationY;
         plateMesh.rotation.z = rotationZ;
-      }
-      if (threadGroup) {
-        threadGroup.rotation.y = rotationY;
-        threadGroup.rotation.z = rotationZ;
       }
       
       renderer.render(scene, camera);
