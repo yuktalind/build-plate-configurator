@@ -44,6 +44,22 @@ gh issue view 123                # View specific issue
 gh issue status                  # View your issues
 ```
 
+## Smoke Test Requirement
+
+**MANDATORY**: Run smoke test before every commit to ensure rendering works.
+
+```bash
+./smoke-test.sh
+```
+
+The smoke test:
+- Starts local HTTP server on port 8765
+- Captures screenshot using playwright CLI
+- Verifies screenshot is not blank
+- Fails if canvas fails to render
+
+**Never commit changes that fail the smoke test.**
+
 ## Development Commands
 
 Since this is a static HTML file with no build process, development is straightforward:
@@ -51,6 +67,7 @@ Since this is a static HTML file with no build process, development is straightf
 - **Local development**: Open `index.html` directly in a browser using `file://` protocol
 - **Local server** (if needed): `python3 -m http.server 8000` then visit `http://localhost:8000`
 - **No build, lint, or test commands** - this is a pure HTML/CSS/JavaScript application
+- **Smoke test**: `./smoke-test.sh` - Run before every commit
 
 ## Deployment
 
