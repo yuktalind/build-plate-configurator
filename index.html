@@ -299,7 +299,9 @@
           const holeMaterial = new THREE.MeshStandardMaterial({
             color: 0x1a1a1a,
             metalness: 0.9,
-            roughness: 0.4
+            roughness: 0.4,
+            transparent: true,
+            opacity: 0.3
           });
           const hole = new THREE.Mesh(holeGeometry, holeMaterial);
           hole.position.set(x, isThrough ? 0 : thickness * 0.1, z);
@@ -318,7 +320,9 @@
       const mountingMaterial = new THREE.MeshStandardMaterial({
         color: 0x0a0a0a,
         metalness: 0.95,
-        roughness: 0.3
+        roughness: 0.3,
+        transparent: true,
+        opacity: 0.3
       });
       
       if (mountingCount === 2) {
