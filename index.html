@@ -214,12 +214,15 @@
   {
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+      "three-mesh-bvh": "./three-mesh-bvh.module.js",
+      "three-bvh-csg": "./three-bvh-csg.module.js"
     }
   }
   </script>
   <script type="module">
     import * as THREE from 'three';
+    import { SUBTRACTION, Brush, Evaluator } from 'three-bvh-csg';
 
     const canvas = document.getElementById('plate-canvas');
     const scene = new THREE.Scene();
@@ -256,8 +259,10 @@
       roughness: 0.2,
       envMapIntensity: 1.0
     });
-    
-    let plateMesh, threadGroup;
+
+    const csgEvaluator = new Evaluator();
+
+    let plateMesh;
     let autoRotate = true;
     let rotationY = 0;
     let rotationZ = -20 * Math.PI / 180;
@@ -267,15 +272,6 @@
     
     function createPlate(width, depth, thickness) {
       if (plateMesh) scene.remove(plateMesh);
-      if (threadGroup) scene.remove(threadGroup);
-      
-      const geometry = new THREE.BoxGeometry(width, thickness, depth);
-      plateMesh = new THREE.Mesh(geometry, aluminumMaterial);
-      plateMesh.castShadow = true;
-      scene.add(plateMesh);
-      
-      threadGroup = new THREE.Group();
-      scene.add(threadGroup);
 
       const threadGrid = parseFloat(document.getElementById('thread-grid').value);
       const edgeMargin = parseFloat(document.getElementById('edge-margin').value);
@@ -283,91 +279,80 @@
       const threadDia = threadType === 'M5' ? 4.2 : threadType === 'M6' ? 5.0 : 6.8;
       const isThrough = thickness <= 9.8;
 
+      // Create base plate brush
+      const plateGeo = new THREE.BoxGeometry(width, thickness, depth);
+      let plateBrush = new Brush(plateGeo);
+      plateBrush.updateMatrixWorld();
+
       const xHoles = Math.floor(width / threadGrid);
       const zHoles = Math.floor(depth / threadGrid);
+      const halfWidth = width / 2;
+      const halfDepth = depth / 2;
 
+      // Subtract thread holes
       for (let i = 0; i <= xHoles; i++) {
         for (let j = 0; j <= zHoles; j++) {
           const x = (i - xHoles / 2) * threadGrid;
           const z = (j - zHoles / 2) * threadGrid;
-
-          // Skip holes that would extend beyond plate boundaries with margin
-          const halfWidth = width / 2;
-          const halfDepth = depth / 2;
           const holeRadius = threadDia / 2;
 
           if (Math.abs(x) + holeRadius + edgeMargin > halfWidth) continue;
           if (Math.abs(z) + holeRadius + edgeMargin > halfDepth) continue;
 
-          const holeGeometry = new THREE.CylinderGeometry(
+          const holeGeo = new THREE.CylinderGeometry(
             threadDia / 2,
             threadDia / 2,
             isThrough ? thickness + 0.5 : thickness * 0.8,
             16
           );
-          const holeMaterial = new THREE.MeshStandardMaterial({
-            color: 0x1a1a1a,
-            metalness: 0.9,
-            roughness: 0.4,
-            transparent: true,
-            opacity: 0
-          });
-          const hole = new THREE.Mesh(holeGeometry, holeMaterial);
-          hole.position.set(x, isThrough ? 0 : thickness * 0.1, z);
-          threadGroup.add(hole);
+          const holeBrush = new Brush(holeGeo);
+          holeBrush.position.set(x, isThrough ? 0 : thickness * 0.1, z);
+          holeBrush.updateMatrixWorld();
+
+          plateBrush = csgEvaluator.evaluate(plateBrush, holeBrush, SUBTRACTION);
         }
       }
-      
+
+      // Subtract mounting holes
       const mountingDia = 6.2;
       const mountingCount = getMountingHoleCount(width, depth);
-      const mountingGeometry = new THREE.CylinderGeometry(
+      const mountingGeo = new THREE.CylinderGeometry(
         mountingDia / 2,
         mountingDia / 2,
         thickness + 0.5,
         16
       );
-      const mountingMaterial = new THREE.MeshStandardMaterial({
-        color: 0x0a0a0a,
-        metalness: 0.95,
-        roughness: 0.3,
-        transparent: true,
-        opacity: 0
-      });
-      
+
+      const mountingPositions = [];
       if (mountingCount === 2) {
-        [-50, 50].forEach(x => {
-          const hole = new THREE.Mesh(mountingGeometry, mountingMaterial);
-          hole.position.set(x, 0, 0);
-          threadGroup.add(hole);
-        });
+        mountingPositions.push([50, 0, 0], [-50, 0, 0]);
       } else if (mountingCount === 4) {
-        [-50, 50].forEach(x => {
-          [-50, 50].forEach(z => {
-            const hole = new THREE.Mesh(mountingGeometry, mountingMaterial);
-            hole.position.set(x, 0, z);
-            threadGroup.add(hole);
-          });
-        });
+        mountingPositions.push([-50, 0, -50], [-50, 0, 50], [50, 0, -50], [50, 0, 50]);
       } else if (mountingCount === 6) {
-        const positions = [[-50, -100], [-50, 0], [-50, 100], [50, -100], [50, 0], [50, 100]];
-        positions.forEach(([x, z]) => {
-          const hole = new THREE.Mesh(mountingGeometry, mountingMaterial);
-          hole.position.set(x, 0, z);
-          threadGroup.add(hole);
-        });
+        mountingPositions.push(
+          [-50, 0, -100], [-50, 0, 0], [-50, 0, 100],
+          [50, 0, -100], [50, 0, 0], [50, 0, 100]
+        );
       } else if (mountingCount === 12) {
-        const positions = [
-          [-100, -150], [-100, -50], [-100, 50], [-100, 150],
-          [0, -150], [0, 150],
-          [100, -150], [100, -50], [100, 50], [100, 150]
-        ];
-        positions.slice(0, mountingCount).forEach(([x, z]) => {
-          const hole = new THREE.Mesh(mountingGeometry, mountingMaterial);
-          hole.position.set(x, 0, z);
-          threadGroup.add(hole);
-        });
+        mountingPositions.push(
+          [-100, 0, -150], [-100, 0, -50], [-100, 0, 50], [-100, 0, 150],
+          [0, 0, -150], [0, 0, 150],
+          [100, 0, -150], [100, 0, -50], [100, 0, 50], [100, 0, 150]
+        );
       }
-      
+
+      mountingPositions.forEach(([x, y, z]) => {
+        const mountingBrush = new Brush(mountingGeo);
+        mountingBrush.position.set(x, y, z);
+        mountingBrush.updateMatrixWorld();
+        plateBrush = csgEvaluator.evaluate(plateBrush, mountingBrush, SUBTRACTION);
+      });
+
+      // Create final mesh
+      plateMesh = new THREE.Mesh(plateBrush.geometry, aluminumMaterial);
+      plateMesh.castShadow = true;
+      scene.add(plateMesh);
+
       updateInfo(width, depth, thickness);
     }
     
@@ -472,10 +457,6 @@
       if (plateMesh) {
         plateMesh.rotation.y = rotationY;
         plateMesh.rotation.z = rotationZ;
-      }
-      if (threadGroup) {
-        threadGroup.rotation.y = rotationY;
-        threadGroup.rotation.z = rotationZ;
       }
       
       renderer.render(scene, camera);
