@@ -183,6 +183,11 @@
         <input id="edge-margin" type="number" value="10" min="0" max="50" step="5">
       </div>
 
+      <div class="control-group">
+        <label>Kantenfase (mm)</label>
+        <input id="edge-bevel" type="number" value="0.5" min="0" max="5" step="0.5">
+      </div>
+
       <div class="divider"></div>
 
       <div class="control-group">
@@ -275,6 +280,7 @@
 
       const threadGrid = parseFloat(document.getElementById('thread-grid').value);
       const edgeMargin = parseFloat(document.getElementById('edge-margin').value);
+      const edgeBevel = parseFloat(document.getElementById('edge-bevel').value);
       const threadType = document.getElementById('thread-type').value;
       const threadDia = threadType === 'M5' ? 4.2 : threadType === 'M6' ? 5.0 : 6.8;
       const isThrough = thickness <= 9.8;
@@ -283,6 +289,36 @@
       const plateGeo = new THREE.BoxGeometry(width, thickness, depth);
       let plateBrush = new Brush(plateGeo);
       plateBrush.updateMatrixWorld();
+
+      // Add edge bevels (45° chamfer on all edges)
+      if (edgeBevel > 0) {
+        const bevelSize = edgeBevel * Math.sqrt(2); // 45° means size * sqrt(2)
+
+        // Top and bottom edge bevels
+        for (let side = -1; side <= 1; side += 2) {
+          const yPos = side * (thickness / 2 + bevelSize / 2);
+
+          // Front/back edges
+          for (let zSide = -1; zSide <= 1; zSide += 2) {
+            const bevelGeo = new THREE.BoxGeometry(width + bevelSize * 2, bevelSize, bevelSize);
+            const bevelBrush = new Brush(bevelGeo);
+            bevelBrush.position.set(0, yPos, zSide * (depth / 2 + bevelSize / 2));
+            bevelBrush.rotation.x = (side * zSide) * Math.PI / 4;
+            bevelBrush.updateMatrixWorld();
+            plateBrush = csgEvaluator.evaluate(plateBrush, bevelBrush, SUBTRACTION);
+          }
+
+          // Left/right edges
+          for (let xSide = -1; xSide <= 1; xSide += 2) {
+            const bevelGeo = new THREE.BoxGeometry(bevelSize, bevelSize, depth + bevelSize * 2);
+            const bevelBrush = new Brush(bevelGeo);
+            bevelBrush.position.set(xSide * (width / 2 + bevelSize / 2), yPos, 0);
+            bevelBrush.rotation.z = (side * xSide) * Math.PI / 4;
+            bevelBrush.updateMatrixWorld();
+            plateBrush = csgEvaluator.evaluate(plateBrush, bevelBrush, SUBTRACTION);
+          }
+        }
+      }
 
       const xHoles = Math.floor(width / threadGrid);
       const zHoles = Math.floor(depth / threadGrid);
@@ -325,7 +361,8 @@
 
       const mountingPositions = [];
       if (mountingCount === 2) {
-        mountingPositions.push([50, 0, 0], [-50, 0, 0]);
+        // 100x200mm: centered holes 100mm apart along depth (Z axis)
+        mountingPositions.push([0, 0, -50], [0, 0, 50]);
       } else if (mountingCount === 4) {
         mountingPositions.push([-50, 0, -50], [-50, 0, 50], [50, 0, -50], [50, 0, 50]);
       } else if (mountingCount === 6) {
@@ -341,11 +378,27 @@
         );
       }
 
+      // Subtract mounting holes with countersink
       mountingPositions.forEach(([x, y, z]) => {
+        // Main hole
         const mountingBrush = new Brush(mountingGeo);
         mountingBrush.position.set(x, y, z);
         mountingBrush.updateMatrixWorld();
         plateBrush = csgEvaluator.evaluate(plateBrush, mountingBrush, SUBTRACTION);
+
+        // Countersink (Senkung) - cone on top
+        const countersinkDia = mountingDia * 2;
+        const countersinkDepth = 3;
+        const countersinkGeo = new THREE.CylinderGeometry(
+          0.1,
+          countersinkDia / 2,
+          countersinkDepth,
+          16
+        );
+        const countersinkBrush = new Brush(countersinkGeo);
+        countersinkBrush.position.set(x, thickness / 2 - countersinkDepth / 2, z);
+        countersinkBrush.updateMatrixWorld();
+        plateBrush = csgEvaluator.evaluate(plateBrush, countersinkBrush, SUBTRACTION);
       });
 
       // Create final mesh
@@ -390,6 +443,7 @@
     document.getElementById('thread-type').addEventListener('change', updatePlate);
     document.getElementById('thread-grid').addEventListener('input', updatePlate);
     document.getElementById('edge-margin').addEventListener('input', updatePlate);
+    document.getElementById('edge-bevel').addEventListener('input', updatePlate);
 
     document.getElementById('bg-brightness').addEventListener('input', (e) => {
       const brightness = parseInt(e.target.value);
