@@ -188,6 +188,11 @@
         <input id="edge-bevel" type="number" value="0.5" min="0" max="5" step="0.5">
       </div>
 
+      <div class="control-group" style="display: flex; align-items: center; gap: 8px;">
+        <input id="show-threads" type="checkbox">
+        <label for="show-threads" style="margin: 0; cursor: pointer;">Gewinde anzeigen (langsam)</label>
+      </div>
+
       <div class="divider"></div>
 
       <div class="control-group">
@@ -281,6 +286,7 @@
       const threadGrid = parseFloat(document.getElementById('thread-grid').value);
       const edgeMargin = parseFloat(document.getElementById('edge-margin').value);
       const edgeBevel = parseFloat(document.getElementById('edge-bevel').value);
+      const showThreads = document.getElementById('show-threads').checked;
       const threadType = document.getElementById('thread-type').value;
       const threadDia = threadType === 'M5' ? 4.2 : threadType === 'M6' ? 5.0 : 6.8;
       const isThrough = thickness <= 9.8;
@@ -325,7 +331,11 @@
       const halfWidth = width / 2;
       const halfDepth = depth / 2;
 
-      // Subtract thread holes
+      // Thread parameters
+      const threadPitch = threadType === 'M5' ? 0.8 : threadType === 'M6' ? 1.0 : 1.25;
+      const threadDepth = threadPitch * 0.6;
+
+      // Subtract thread holes with thread ridges
       for (let i = 0; i <= xHoles; i++) {
         for (let j = 0; j <= zHoles; j++) {
           const x = (i - xHoles / 2) * threadGrid;
@@ -335,17 +345,38 @@
           if (Math.abs(x) + holeRadius + edgeMargin > halfWidth) continue;
           if (Math.abs(z) + holeRadius + edgeMargin > halfDepth) continue;
 
+          const holeDepth = isThrough ? thickness + 0.5 : thickness * 0.8;
           const holeGeo = new THREE.CylinderGeometry(
             threadDia / 2,
             threadDia / 2,
-            isThrough ? thickness + 0.5 : thickness * 0.8,
+            holeDepth,
             16
           );
           const holeBrush = new Brush(holeGeo);
-          holeBrush.position.set(x, isThrough ? 0 : thickness * 0.1, z);
+          const holeY = isThrough ? 0 : thickness * 0.1;
+          holeBrush.position.set(x, holeY, z);
           holeBrush.updateMatrixWorld();
 
           plateBrush = csgEvaluator.evaluate(plateBrush, holeBrush, SUBTRACTION);
+
+          // Add thread ridges (rings) to thread holes - every 2nd thread for performance
+          if (showThreads) {
+            const numThreads = Math.floor(holeDepth / threadPitch / 2);
+            for (let t = 0; t < numThreads; t++) {
+              const threadY = holeY - holeDepth / 2 + t * threadPitch * 2;
+              const ringGeo = new THREE.TorusGeometry(
+                threadDia / 2 + threadDepth / 2,
+                threadDepth / 2,
+                6,
+                12
+              );
+              const ringBrush = new Brush(ringGeo);
+              ringBrush.position.set(x, threadY, z);
+              ringBrush.rotation.x = Math.PI / 2;
+              ringBrush.updateMatrixWorld();
+              plateBrush = csgEvaluator.evaluate(plateBrush, ringBrush, SUBTRACTION);
+            }
+          }
         }
       }
 
@@ -378,7 +409,9 @@
         );
       }
 
-      // Subtract mounting holes with countersink
+      // Subtract mounting holes with countersink and thread ridges
+      const countersinkDepth = Math.min(thickness * 0.4, 4); // Max 4mm or 40% of thickness
+
       mountingPositions.forEach(([x, y, z]) => {
         // Main hole
         const mountingBrush = new Brush(mountingGeo);
@@ -388,7 +421,6 @@
 
         // Countersink (Senkung) - cone on top
         const countersinkDia = mountingDia * 2;
-        const countersinkDepth = 3;
         const countersinkGeo = new THREE.CylinderGeometry(
           0.1,
           countersinkDia / 2,
@@ -399,6 +431,25 @@
         countersinkBrush.position.set(x, thickness / 2 - countersinkDepth / 2, z);
         countersinkBrush.updateMatrixWorld();
         plateBrush = csgEvaluator.evaluate(plateBrush, countersinkBrush, SUBTRACTION);
+
+        // Add thread ridges (rings) to mounting holes - every 2nd thread for performance
+        if (showThreads) {
+          const numMountingThreads = Math.floor((thickness + 0.5) / threadPitch / 2);
+          for (let i = 0; i < numMountingThreads; i++) {
+            const threadY = -thickness / 2 + i * threadPitch * 2;
+            const ringGeo = new THREE.TorusGeometry(
+              mountingDia / 2 + threadDepth / 2,
+              threadDepth / 2,
+              6,
+              12
+            );
+            const ringBrush = new Brush(ringGeo);
+            ringBrush.position.set(x, threadY, z);
+            ringBrush.rotation.x = Math.PI / 2;
+            ringBrush.updateMatrixWorld();
+            plateBrush = csgEvaluator.evaluate(plateBrush, ringBrush, SUBTRACTION);
+          }
+        }
       });
 
       // Create final mesh
@@ -444,6 +495,7 @@
     document.getElementById('thread-grid').addEventListener('input', updatePlate);
     document.getElementById('edge-margin').addEventListener('input', updatePlate);
     document.getElementById('edge-bevel').addEventListener('input', updatePlate);
+    document.getElementById('show-threads').addEventListener('change', updatePlate);
 
     document.getElementById('bg-brightness').addEventListener('input', (e) => {
       const brightness = parseInt(e.target.value);
